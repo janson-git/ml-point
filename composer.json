@@ -1,0 +1,16 @@
+{
+    "name": "janson/php-ml",
+    "authors": [
+        {
+            "name": "janson-git",
+            "email": "ivan.janson@gmail.com"
+        }
+    ],
+    "require": {
+        "php-ai/php-ml": "*",
+        "symfony/console": "*"
+    },
+    "autoload": {
+        "psr-4": {"app\\": "app/"}
+    }
+}
