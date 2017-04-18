@@ -1,18 +1,19 @@
 <?php declare(strict_types=1);
 
-use app\command\BatchProcessCommand;
 use app\DataFrameCsv;
+use Symfony\Component\Console\Application;
 
 require __DIR__ . '/vendor/autoload.php';
 
-use Symfony\Component\Console\Application;
-
 $app = new Application();
+$app->setAutoExit(false);
 
 // ... register commands
-$app->add(new BatchProcessCommand());
+$app->setDefaultCommand('base');
 
-$app->run();
+while (!$app->isAutoExitEnabled()) {
+    $result = $app->run();
+}
 
 
 //
