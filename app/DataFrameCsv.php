@@ -22,7 +22,7 @@ class DataFrameCsv extends \Phpml\Dataset\CsvDataset
 
     public function head(int $count = 5)
     {
-        $samples = array_slice($this->samples, 0, $count);
+        $samples = array_slice($this->samples, 0, $count, true);
         $targets = array_slice($this->targets, 0, $count);
         foreach ($targets as $key => $val) {
             array_push($samples[$key], $val);
@@ -32,7 +32,12 @@ class DataFrameCsv extends \Phpml\Dataset\CsvDataset
 
     public function tail(int $count = 5)
     {
-        $this->renderTable(array_slice($this->samples, -$count));
+        $samples = array_slice($this->samples, -$count, null, true);
+        $targets = array_slice($this->targets, -$count, null, true);
+        foreach ($targets as $key => $val) {
+            array_push($samples[$key], $val);
+        }
+        $this->renderTable($samples);
     }
 
     public function setColumnNames(array $columnNames)
@@ -44,6 +49,26 @@ class DataFrameCsv extends \Phpml\Dataset\CsvDataset
     {
         $this->columnNames[$index] = $name;
     }
+
+    public function at(int $row, int $column)
+    {
+        return isset($this->samples[$row])
+            ? ($this->samples[$row][$column] ?? null)
+            : null;
+    }
+
+    public function describe()
+    {
+        /** TODO
+         * С помощью метода describe() получим некоторую сводную информацию по всей таблице.
+         * По умолчанию будет выдана информация только для количественных признаков.
+         * Это общее их количество (count), среднее значение (mean), стандартное отклонение (std),
+         * минимальное (min), макcимальное (max) значения, медиана (50%) и значения нижнего (25%)
+         * и верхнего (75%) квартилей
+         */
+    }
+
+    /** PROTECTED *****************************************************/
 
     protected function renderTable($data)
     {
