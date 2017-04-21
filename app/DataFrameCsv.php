@@ -1,16 +1,25 @@
-<?php declare(strict_types=1);
+<?php
 
 namespace app;
 
+use DataSet;
+use Phpml\Dataset\CsvDataset;
 use Phpml\Math\Statistic\Mean;
 use Phpml\Math\Statistic\StandardDeviation;
 use Symfony\Component\Console\Helper\Table;
 use Symfony\Component\Console\Output\OutputInterface;
 
-class DataFrameCsv extends \Phpml\Dataset\CsvDataset
+class DataFrameCsv extends BaseObject
 {
     /** @var OutputInterface */
     protected $output;
+    /** @var DataSet  */
+    protected $dataSet;
+
+    public function __construct(string $filepath, int $features, bool $headingRow = true)
+    {
+        $this->dataSet = new CsvDataset($filepath, $features, $headingRow);
+    }
 
     public function setOutput(OutputInterface $output)
     {
@@ -19,39 +28,37 @@ class DataFrameCsv extends \Phpml\Dataset\CsvDataset
 
     public function shape()
     {
-        $this->output->writeln([count($this->samples), count($this->columnNames)]);
+        $this->output->writeln([count($this->dataSet->getSamples()), count($this->dataSet->getColumnNames())]);
     }
 
     public function head(int $count = 5)
     {
-        $samples = array_slice($this->samples, 0, $count, true);
-        $targets = array_slice($this->targets, 0, $count);
+        $samples = array_slice($this->dataSet->getSamples(), 0, $count, true);
+        $targets = array_slice($this->dataSet->getTargets(), 0, $count);
         foreach ($targets as $key => $val) {
-            array_push($samples[$key], $val);
+            $samples[$key][] = $val;
         }
-        $this->renderTable($samples, $this->getColumnNames());
+        $this->renderTable($samples, $this->dataSet->getColumnNames());
     }
 
     public function tail(int $count = 5)
     {
-        $samples = array_slice($this->samples, -$count, null, true);
-        $targets = array_slice($this->targets, -$count, null, true);
+        $samples = array_slice($this->dataSet->getSamples(), -$count, null, true);
+        $targets = array_slice($this->dataSet->getTargets(), -$count, null, true);
         foreach ($targets as $key => $val) {
-            array_push($samples[$key], $val);
+            $samples[$key][] = $val;
         }
-        $this->renderTable($samples, $this->getColumnNames());
+        $this->renderTable($samples, $this->dataSet->getColumnNames());
     }
 
     public function setColumnName(int $index, string $name)
     {
-        $this->columnNames[$index] = $name;
+        $this->dataSet->setColumnName($index, $name);
     }
 
     public function at(int $row, int $column)
     {
-        return isset($this->samples[$row])
-            ? ($this->samples[$row][$column] ?? null)
-            : null;
+        return $this->dataSet->at($row, $column);
     }
 
     public function describe()
@@ -84,16 +91,19 @@ class DataFrameCsv extends \Phpml\Dataset\CsvDataset
             'max'   => [],
         ];
 
-        $columns = count($this->columnNames);
-        $totalRows = count($this->samples);
+        $columns = count($this->dataSet->getColumnNames());
+        $totalRows = count($this->dataSet->getSamples());
         for ($i = 0; $i < $columns; $i++) {
-            $vals = array_column($this->samples, $i);
+            $vals = array_column($this->dataSet->getSamples(), $i);
             $counters = array_count_values($vals);
 
             $valuesCount = $totalRows;
             if (isset($counters['?'])) {
                 $valuesCount -= $counters['?'];
                 unset($counters['?']);
+                $vals = array_filter($vals, function($item) {
+                    return $item !== '?';
+                });
             }
             $isNumeric = null;
             foreach ($counters as $key => $val) {
@@ -124,17 +134,22 @@ class DataFrameCsv extends \Phpml\Dataset\CsvDataset
                 ? (($vals[ (int)floor($bottomPosition) ] + $vals[ (int)ceil($bottomPosition) ]) / 2)
                 : $vals[ (int)$bottomPosition ];
 
-            $describe['count'][$i] = array_sum($counters);
-            $describe['mean'][$i]  = Mean::arithmetic($vals);
-            $describe['std'][$i]   = StandardDeviation::population($vals);
-            $describe['min'][$i]   = $vals[0];
-            $describe['25%'][$i]   = $quartileBottom;
-            $describe['50%'][$i]   = Mean::median($vals);
-            $describe['75%'][$i]   = $quartileTop;
-            $describe['max'][$i]   = max($vals);
+            $describe['count'][$i] = $this->numberFormat($valuesCount);
+            $describe['mean'][$i]  = $this->numberFormat(Mean::arithmetic($vals));
+            $describe['std'][$i]   = $this->numberFormat(StandardDeviation::population($vals));
+            $describe['min'][$i]   = $this->numberFormat($vals[0]);
+            $describe['25%'][$i]   = $this->numberFormat($quartileBottom);
+            $describe['50%'][$i]   = $this->numberFormat(Mean::median($vals));
+            $describe['75%'][$i]   = $this->numberFormat($quartileTop);
+            $describe['max'][$i]   = $this->numberFormat(max($vals));
         }
 
-        $this->renderTable($describe);
+        foreach ($describe as $key => &$arr) {
+            array_unshift($arr, $key);
+        }
+        array_unshift($numericColumns, '');
+
+        $this->renderTable($describe, $numericColumns);
     }
 
     /** PROTECTED *****************************************************/
@@ -147,5 +162,10 @@ class DataFrameCsv extends \Phpml\Dataset\CsvDataset
         }
         $table->addRows($data);
         $table->render();
+    }
+
+    protected function numberFormat(float $value, int $decimals = 6)
+    {
+        return number_format($value, $decimals, '.', '');
     }
 }
