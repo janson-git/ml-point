@@ -16,6 +16,9 @@ class DataFrameCsv extends BaseObject
     /** @var DataSet  */
     protected $dataSet;
 
+    protected $numericColumns  = [];
+    protected $categoryColumns = [];
+
     public function __construct(string $filepath, int $features, bool $headingRow = true)
     {
         $this->dataSet = new CsvDataset($filepath, $features, $headingRow);
@@ -61,7 +64,7 @@ class DataFrameCsv extends BaseObject
         return $this->dataSet->at($row, $column);
     }
 
-    public function describe()
+    public function describe($categorical = false)
     {
         /** TODO
          * С помощью метода describe() получим некоторую сводную информацию по всей таблице.
@@ -78,23 +81,36 @@ class DataFrameCsv extends BaseObject
             75% 	38.230000 	7.207500 	2.625000 	3.00000 	276.000000 	395.500000
             max 	80.250000 	28.000000 	28.500000 	67.00000 	2000.000000 	100000.000000
          */
-        $numericColumns = [];
-        $categoryColumns = [];
-        $describe = [
-            'count' => [],
-            'mean'  => [],
-            'std'   => [],
-            'min'   => [],
-            '25%'   => [],
-            '50%'   => [],
-            '75%'   => [],
-            'max'   => [],
-        ];
+        $this->numericColumns = [];
+        $this->categoryColumns = [];
+        if ($categorical) {
+            $describe = [
+                'count'  => [],
+                'unique' => [],
+                'top'    => [],
+                'freq'   => [],
+            ];
+        } else {
+            $describe = [
+                'count' => [],
+                'mean'  => [],
+                'std'   => [],
+                'min'   => [],
+                '25%'   => [],
+                '50%'   => [],
+                '75%'   => [],
+                'max'   => [],
+            ];
+        }
 
         $columns = count($this->dataSet->getColumnNames());
         $totalRows = count($this->dataSet->getSamples());
         for ($i = 0; $i < $columns; $i++) {
-            $vals = array_column($this->dataSet->getSamples(), $i);
+            if ( ($i+1) == $columns) {
+                $vals = $this->dataSet->getTargets();
+            } else {
+                $vals = array_column($this->dataSet->getSamples(), $i);
+            }
             $counters = array_count_values($vals);
 
             $valuesCount = $totalRows;
@@ -105,51 +121,103 @@ class DataFrameCsv extends BaseObject
                     return $item !== '?';
                 });
             }
-            $isNumeric = null;
+            $isCategorical = null;
             foreach ($counters as $key => $val) {
-                if (is_numeric($key) && $isNumeric !== false) {
-                    $isNumeric = true;
+                if (is_numeric($key)) {
+                    $isCategorical = false;
                 } else {
-                    $isNumeric = false;
+                    $isCategorical = true;
                 }
             }
+            if (($i+1) == $columns) {
+                $isCategorical ? $this->categoryColumns[] = 'class' : $this->numericColumns[] = 'class';
+            } else {
+                $isCategorical ? $this->categoryColumns[] = $i : $this->numericColumns[] = $i;
+            }
 
-            $isNumeric ? $numericColumns[] = $i : $categoryColumns[] = $i;
 
-            // TODO: пока работаем только с количественными признаками
-            if (!$isNumeric) {
+            if ( ($categorical && !$isCategorical) || (!$categorical && $isCategorical) ) {
                 continue;
             }
 
-            sort($vals);
-            $count = count($vals);
-
-            $topPosition = 0.75 * ($count + 1);
-            $quartileTop = is_float($topPosition)
-                ? (($vals[ (int)floor($topPosition) ] + $vals[ (int)ceil($topPosition) ]) / 2)
-                : $vals[ (int)$topPosition ];
-
-            $bottomPosition = 0.25 * ($count + 1);
-            $quartileBottom = is_float($bottomPosition)
-                ? (($vals[ (int)floor($bottomPosition) ] + $vals[ (int)ceil($bottomPosition) ]) / 2)
-                : $vals[ (int)$bottomPosition ];
-
-            $describe['count'][$i] = $this->numberFormat($valuesCount);
-            $describe['mean'][$i]  = $this->numberFormat(Mean::arithmetic($vals));
-            $describe['std'][$i]   = $this->numberFormat(StandardDeviation::population($vals));
-            $describe['min'][$i]   = $this->numberFormat($vals[0]);
-            $describe['25%'][$i]   = $this->numberFormat($quartileBottom);
-            $describe['50%'][$i]   = $this->numberFormat(Mean::median($vals));
-            $describe['75%'][$i]   = $this->numberFormat($quartileTop);
-            $describe['max'][$i]   = $this->numberFormat(max($vals));
+            if ($categorical) {
+                $columnDescribe = $this->countCategoricalDescribeForValues($vals, $valuesCount);
+            } else {
+                $columnDescribe = $this->countNumericalDescribeForValues($vals, $valuesCount);
+            }
+            foreach ($describe as $key => &$values) {
+                if (isset($columnDescribe[$key])) {
+                    $values[$i] = $columnDescribe[$key];
+                }
+            }
+            unset($values);
         }
 
         foreach ($describe as $key => &$arr) {
             array_unshift($arr, $key);
         }
-        array_unshift($numericColumns, '');
+        unset($arr);
+        $columnNames = $categorical ? $this->categoryColumns : $this->numericColumns;
 
-        $this->renderTable($describe, $numericColumns);
+        array_unshift($columnNames, '');
+        $this->renderTable($describe, $columnNames);
+    }
+
+
+    protected function countCategoricalDescribeForValues($vals, $valuesCount)
+    {
+        // В таблице для каждого категориального признака приведено общее число заполненных ячеек (count),
+        // количество значений, которые принимает данный признак (unique),
+        // самое популярное (часто встречающееся) значение этого признака (top) и количество объектов,
+        // в которых встречается самое частое значение данного признака (freq).
+
+        $frequencies = array_count_values($vals);
+        arsort($frequencies, SORT_NUMERIC);
+
+        $describe['count']  = (int)$valuesCount;
+        $describe['unique'] = (int)count($frequencies);
+        $describe['top']    = key($frequencies);
+        $describe['freq']   = (int)current($frequencies);
+
+        return $describe;
+    }
+
+
+    protected function countNumericalDescribeForValues($vals, $valuesCount)
+    {
+        sort($vals);
+        $count = count($vals);
+
+        $topPosition = 0.75 * ($count + 1);
+        $quartileTop = is_float($topPosition)
+            ? (($vals[ (int)floor($topPosition) ] + $vals[ (int)ceil($topPosition) ]) / 2)
+            : $vals[ (int)$topPosition ];
+
+        $bottomPosition = 0.25 * ($count + 1);
+        $quartileBottom = is_float($bottomPosition)
+            ? (($vals[ (int)floor($bottomPosition) ] + $vals[ (int)ceil($bottomPosition) ]) / 2)
+            : $vals[ (int)$bottomPosition ];
+
+        $describe['count'] = $this->numberFormat($valuesCount);
+        $describe['mean']  = $this->numberFormat(Mean::arithmetic($vals));
+        $describe['std']   = $this->numberFormat(StandardDeviation::population($vals));
+        $describe['min']   = $this->numberFormat($vals[0]);
+        $describe['25%']   = $this->numberFormat($quartileBottom);
+        $describe['50%']   = $this->numberFormat(Mean::median($vals));
+        $describe['75%']   = $this->numberFormat($quartileTop);
+        $describe['max']   = $this->numberFormat(max($vals));
+
+        return $describe;
+    }
+
+    public function numericColumns()
+    {
+        $this->output->writeln(implode(',', $this->numericColumns));
+    }
+
+    public function categoryColumns()
+    {
+        $this->output->writeln(implode(',', $this->categoryColumns));
     }
 
     /** PROTECTED *****************************************************/
