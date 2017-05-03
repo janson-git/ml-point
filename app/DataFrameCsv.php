@@ -4,6 +4,7 @@ namespace app;
 
 use DataSet;
 use Phpml\Dataset\CsvDataset;
+use Phpml\Math\Statistic\Correlation;
 use Phpml\Math\Statistic\Mean;
 use Phpml\Math\Statistic\StandardDeviation;
 use Symfony\Component\Console\Helper\Table;
@@ -64,9 +65,9 @@ class DataFrameCsv extends BaseObject
         return $this->dataSet->at($row, $column);
     }
 
-    public function describe($categorical = false)
+    public function describe($isCategorical = false)
     {
-        /** TODO
+        /**
          * С помощью метода describe() получим некоторую сводную информацию по всей таблице.
          * По умолчанию будет выдана информация только для количественных признаков.
          * Это общее их количество (count), среднее значение (mean), стандартное отклонение (std),
@@ -83,7 +84,7 @@ class DataFrameCsv extends BaseObject
          */
         $this->numericColumns = [];
         $this->categoryColumns = [];
-        if ($categorical) {
+        if ($isCategorical) {
             $describe = [
                 'count'  => [],
                 'unique' => [],
@@ -106,7 +107,8 @@ class DataFrameCsv extends BaseObject
         $columns = count($this->dataSet->getColumnNames());
         $totalRows = count($this->dataSet->getSamples());
         for ($i = 0; $i < $columns; $i++) {
-            if ( ($i+1) == $columns) {
+            $isLastIteration = ($columns === ($i+1));
+            if ($isLastIteration) {
                 $vals = $this->dataSet->getTargets();
             } else {
                 $vals = array_column($this->dataSet->getSamples(), $i);
@@ -121,30 +123,31 @@ class DataFrameCsv extends BaseObject
                     return $item !== '?';
                 });
             }
-            $isCategorical = null;
+            $isCategoricalColumn = null;
             foreach ($counters as $key => $val) {
                 if (is_numeric($key)) {
-                    $isCategorical = false;
+                    $isCategoricalColumn = false;
                 } else {
-                    $isCategorical = true;
+                    $isCategoricalColumn = true;
                 }
             }
-            if (($i+1) == $columns) {
-                $isCategorical ? $this->categoryColumns[] = 'class' : $this->numericColumns[] = 'class';
+            if ($isLastIteration) {
+                $isCategoricalColumn ? $this->categoryColumns[] = 'class' : $this->numericColumns[] = 'class';
             } else {
-                $isCategorical ? $this->categoryColumns[] = $i : $this->numericColumns[] = $i;
+                $isCategoricalColumn ? $this->categoryColumns[] = $i : $this->numericColumns[] = $i;
             }
 
-
-            if ( ($categorical && !$isCategorical) || (!$categorical && $isCategorical) ) {
+            // use only needed columns
+            if ( ($isCategorical && !$isCategoricalColumn) || (!$isCategorical && $isCategoricalColumn) ) {
                 continue;
             }
 
-            if ($categorical) {
+            if ($isCategorical) {
                 $columnDescribe = $this->countCategoricalDescribeForValues($vals, $valuesCount);
             } else {
                 $columnDescribe = $this->countNumericalDescribeForValues($vals, $valuesCount);
             }
+            // fill describe array with current column values
             foreach ($describe as $key => &$values) {
                 if (isset($columnDescribe[$key])) {
                     $values[$i] = $columnDescribe[$key];
@@ -153,11 +156,12 @@ class DataFrameCsv extends BaseObject
             unset($values);
         }
 
+        // add row name to display it
         foreach ($describe as $key => &$arr) {
             array_unshift($arr, $key);
         }
         unset($arr);
-        $columnNames = $categorical ? $this->categoryColumns : $this->numericColumns;
+        $columnNames = $isCategorical ? $this->categoryColumns : $this->numericColumns;
 
         array_unshift($columnNames, '');
         $this->renderTable($describe, $columnNames);
@@ -236,4 +240,55 @@ class DataFrameCsv extends BaseObject
     {
         return number_format($value, $decimals, '.', '');
     }
+
+
+    protected $correlationColumns = [];
+
+    /**
+     * Returns correlation matrix for numeric columns
+     * @throws \Phpml\Exception\InvalidArgumentException
+     */
+    public function corr()
+    {
+        $matrix = [];
+
+        $columns = count($this->dataSet->getColumnNames());
+        for ($i = 0; $i < $columns; $i++) {
+            $vals = array_column($this->dataSet->getSamples(), $i);
+            $counters = array_count_values($vals);
+
+            $isNumericColumn = null;
+            foreach ($counters as $key => $val) {
+                if (is_numeric($key)) {
+                    $isNumericColumn = true;
+                    break;
+                }
+            }
+
+            // only numeric columns can be used for matrix
+            if (!$isNumericColumn) {
+                continue;
+            }
+            $this->correlationColumns[$i] = $vals;
+        }
+
+        $count = count($this->correlationColumns);
+        foreach ($this->correlationColumns as $i => $columnValuesX) {
+            foreach ($this->correlationColumns as $j => $columnValuesY) {
+                if ($j === $i) {
+                    $matrix[$i][$j] = number_format(1, 6);
+                    continue;
+                }
+                // calculate matrix coefficient for position
+                $regressionValue = Correlation::pearson($columnValuesX, $columnValuesY);
+                if ($regressionValue !== null) {
+                    $matrix[ $i ][ $j ] = $regressionValue;
+                }
+            }
+
+        }
+
+        $this->renderTable($matrix);
+    }
+
 }
